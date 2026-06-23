@@ -1,0 +1,32 @@
+[package]
+name = "rustos"
+version = "0.1.0"
+edition = "2021"
+description = "Giriş seviyesi, Rust + Assembly ile yazılmış Multiboot uyumlu bir işletim sistemi çekirdeği"
+
+[[bin]]
+name = "rustos"
+path = "src/main.rs"
+
+[dependencies]
+linked_list_allocator = "0.10"
+
+[dependencies.smoltcp]
+version = "0.13"
+default-features = false
+features = [
+    "alloc",
+    "medium-ethernet",
+    "proto-ipv4",
+    "proto-dhcpv4",
+    "socket-tcp",
+    "socket-dhcpv4",
+    "socket-dns",
+]
+
+# Çekirdekte stack-unwinding yok; panik = abort.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

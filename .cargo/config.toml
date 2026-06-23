@@ -1,0 +1,16 @@
+# Tüm cargo komutları varsayılan olarak bizim özel hedefimizi kullanır.
+[build]
+target = "i686-os.json"
+
+# Standart kütüphane bizim hedefimiz için önceden derlenmiş gelmez,
+# bu yüzden `core` ve `compiler_builtins`'i kaynaktan derliyoruz.
+[unstable]
+# Özel .json hedef tanımlarının kullanımını etkinleştirir (Rust 1.95+).
+json-target-spec = true
+build-std = ["core", "compiler_builtins", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+# `cargo run` çekirdeği doğrudan QEMU'da Multiboot olarak başlatır.
+# QEMU'nun -kernel bayrağı, GRUB'a gerek kalmadan Multiboot ELF dosyasını yükler.
+[target.'cfg(target_os = "none")']
+runner = ["qemu-system-i386", "-kernel"]

@@ -1,0 +1,10 @@
+# Derleme çıktıları ve büyük/üretilen dosyalar
+/target
+/build
+/disk.img
+
+# macOS
+.DS_Store
+
+# Not: Cargo.lock bilerek commit'lenir (bu bir uygulama/çekirdek; yeniden
+# üretilebilir derleme için lock dosyası tutulur).
