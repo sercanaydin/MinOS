@@ -385,6 +385,15 @@ GRUB / QEMU  ──►  boot.asm (_start)  ──►  kernel_main()  ──►  
   2. Terminale dön (`F1`/`ESC`) ve `run c4 kod.c` ile **c4** kaynağı derler ve
      kendi sanal makinesinde çalıştırır — hepsi OS içinde, ana makinede derleme yok.
 
+  Aşağıda gömülü örnek `ornek.c`'nin OS içinde derlenip çalıştırılışı görülüyor
+  (`cat ornek.c` ile kaynak, `run c4 ornek.c` ile c4'ün derleyip kendi VM'inde
+  yürütmesi):
+
+![C derleyici (c4) ile OS içinde derle-çalıştır](docs/c4_compile.png)
+
+  > c4 kısıtları: yerel değişkenler fonksiyonun **en başında** tanımlanır,
+  > `for` yerine `while` kullanılır, tipler yalnız `int`/`char`/pointer'dır.
+
   `c4` ("C in four functions", Robert Swierczek, MIT) C'nin bir alt kümesini destekler:
   `char/int/pointer`, `if/while/return`, `enum`, `sizeof`, aritmetik/mantık/karşılaştırma
   işleçleri ve `open/read/close/printf/malloc/free/memset/memcmp/exit` kütüphane
