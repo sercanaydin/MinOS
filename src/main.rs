@@ -169,7 +169,7 @@ fn mount_disk() {
 /// İlk biçimlendirmeden sonra birkaç örnek dosya oluşturur. Böylece
 /// masaüstü boş açılmaz ve dosya sistemi hemen denenebilir.
 pub fn seed_files() {
-    let samples: [(&str, &str); 2] = [
+    let samples: [(&str, &str); 3] = [
         (
             "oku-beni.txt",
             "MinOS'a hos geldin!\n\nBu dosya sistemi kalicidir; yeniden baslatinca korunur.\nMasaustunde bir ikona tiklayarak icerigini gorebilirsin.\n",
@@ -177,6 +177,15 @@ pub fn seed_files() {
         (
             "turkce.txt",
             "Pijamali hasta yagiz sofore cabucak guvendi.\ncgiosu CGIOSU test satiri.\n",
+        ),
+        // c4 derleyicisiyle DERLENEBILEN ornek. Kurallar (c4 kisitlari):
+        //  - yerel degiskenler fonksiyonun EN BASINDA, komutlardan once
+        //  - 'for' YOK -> 'while' kullan
+        //  - tipler yalniz int/char/pointer; #include gerekmez (printf gomulu)
+        // Test: terminalde  run c4 ornek.c
+        (
+            "ornek.c",
+            "int main()\n{\n  int i;\n  int toplam;\n  i = 1;\n  toplam = 0;\n  while (i <= 10) {\n    printf(\"%d. adim, toplam %d\\n\", i, toplam);\n    toplam = toplam + i;\n    i = i + 1;\n  }\n  printf(\"1..10 toplami = %d\\n\", toplam);\n  return 0;\n}\n",
         ),
     ];
     // Örnek bir dizin de oluştur (dizin sistemi gösterimi için).

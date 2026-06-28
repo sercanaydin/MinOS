@@ -396,8 +396,9 @@ GRUB / QEMU  ──►  boot.asm (_start)  ──►  kernel_main()  ──►  
   **C için klavye — AltGr (Sağ Alt / macOS'ta Option) katmanı:** C'nin gerektirdiği
   `{ } [ ] \ | @ # ~` simgeleri Türkçe-Q'da AltGr ile üretilir (`AltGr+7={`, `AltGr+8=[`,
   `AltGr+9=]`, `AltGr+0=}`, `AltGr+* = \`, `AltGr+- = |`, `AltGr+Q=@`, `AltGr+3=#`,
-  `AltGr+ü=~`). `<` / `>` iki şekilde yazılır: Z'nin solundaki 102. tuş (ISO klavye) **ya da**
-  `AltGr+ö = <`, `AltGr+ç = >` (ANSI MacBook gibi 102. tuşu olmayan klavyeler için).
+  `AltGr+ü=~`). `<` / `>` için `AltGr+ö = <`, `AltGr+ç = >` kullanılır. Çift tırnak `"`
+  ESC altındaki tuştadır; macOS/QEMU bu tuşla 102. tuşu yer değiştirdiği için her iki
+  fiziksel tuş da `"` üretir.
 
   **Editörde imleç:** Ok tuşları (←/→/↑/↓) ile gezinir, `Home`/`End` satır başı/sonu,
   `Delete` öndeki karakteri, `Backspace` imleçten önceki karakteri siler; yazılanlar

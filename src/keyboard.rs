@@ -62,7 +62,7 @@ const fn build_map(shift: bool) -> [char; 128] {
     m[0x26] = if shift { 'L' } else { 'l' };
     m[0x27] = if shift { 'Ş' } else { 'ş' };
     m[0x28] = if shift { 'İ' } else { 'i' }; // ' tuşu → noktalı i / İ
-    m[0x29] = if shift { 'é' } else { '"' };
+    m[0x29] = if shift { 'é' } else { '"' }; // ESC altı tuş: Türkçe-Q'da " / é
 
     // Üçüncü harf sırası: z x c v b n m ö ç .
     m[0x2B] = if shift { ';' } else { ',' };
@@ -77,8 +77,10 @@ const fn build_map(shift: bool) -> [char; 128] {
     m[0x34] = if shift { 'Ç' } else { 'ç' };
     m[0x35] = if shift { ':' } else { '.' };
 
-    // 102. tuş (Z'nin solu, "<>" tuşu) — programlama için kullanışlı.
-    m[0x56] = if shift { '>' } else { '<' };
+    // 102. tuş (0x56). macOS/QEMU Cocoa, ESC altındaki grave (0x29) ile bu tuşu yer
+    // değiştirir; o yüzden bunu da " / é yaparız ki ESC altı tuş hangi scancode'u
+    // gönderirse göndersin tırnak üretsin. '<' / '>' zaten AltGr+ö / AltGr+ç ile yazılır.
+    m[0x56] = if shift { 'é' } else { '"' };
 
     m[0x39] = ' '; // Boşluk
 
@@ -91,6 +93,10 @@ static MAP_ALTGR: [char; 128] = build_altgr();
 
 const fn build_altgr() -> [char; 128] {
     let mut m = ['\0'; 128];
+    // ESC altındaki " tuşu macOS/QEMU'da iletilmediği için ulaşılabilir bir yedek:
+    // AltGr+2 = " (Shift+2 = ' olduğundan akılda kalıcı), AltGr+1 = '.
+    m[0x02] = '\''; // 1
+    m[0x03] = '"'; // 2
     m[0x04] = '#'; // 3
     m[0x05] = '$'; // 4
     m[0x08] = '{'; // 7
@@ -186,8 +192,17 @@ pub fn poll_port() {
     feed(code);
 }
 
+/// Hata ayıklama: her ham tarama kodunu COM1'e yaz. `make run-serial` ile açıldığında
+/// terminalde görünür. Sorun çözülünce kaldırılacak.
+static mut SCANDEBUG: bool = true;
+
 /// Tarama kodunu karaktere çevirip tampona koyar.
 pub fn feed(code: u8) {
+    if unsafe { SCANDEBUG } {
+        crate::serial::write_str("SC=");
+        crate::serial::write_hex(code as u32);
+        crate::serial::write_byte(b'\n');
+    }
     // 0xE0: genişletilmiş tuş ön eki (Sağ Alt / AltGr, oklar, ...).
     if code == 0xE0 {
         unsafe { EXTENDED = true };
