@@ -208,6 +208,30 @@ pub fn clear(packed: u32) {
     }
 }
 
+/// Kullanıcı alanından gelen 0x00RRGGBB piksel tamponunu (`w`×`h`) ekrana
+/// `(dx, dy)` konumuna kopyalar; her pikseli donanım biçimine paketler.
+/// `SYS_BLIT` sistem çağrısı bunu kullanır (kullanıcı kendi tamponunda çizer,
+/// tek çağrıyla ekrana basar). Ekran dışına taşan kısımlar kırpılır.
+pub fn blit_rgb(dx: usize, dy: usize, w: usize, h: usize, src: *const u32) {
+    if let Some(f) = fb() {
+        for j in 0..h {
+            let py = dy + j;
+            if py >= f.height {
+                break;
+            }
+            for i in 0..w {
+                let px = dx + i;
+                if px >= f.width {
+                    continue;
+                }
+                let hexv = unsafe { core::ptr::read_unaligned(src.add(j * w + i)) };
+                let packed = pack((hexv >> 16) as u8, (hexv >> 8) as u8, hexv as u8);
+                write_pixel(f, px, py, packed);
+            }
+        }
+    }
+}
+
 // --- Bochs/QEMU VBE: çalışma anında grafik mod (BIOS'suz) ---
 //
 // QEMU'nun standart VGA aygıtı, Bochs VBE "DISPI" yazmaçlarını destekler. Bu

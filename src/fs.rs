@@ -8,7 +8,7 @@
 //!
 //! Dizin girdisi (128 bayt):
 //!   ad[28] + used(1) + kind(1) + parent+1(1) + ayrılmış(1) + size(4)
-//!   + block_count(4) + blocks[22]*4.
+//!   + block_count(4) + blocks[44]*2 (blok no'ları u16; disk ≤ 65535 blok).
 //! Her dosya en çok 22 doğrudan bloğa (≈ 11 KiB) sahip olabilir.
 //!
 //! Dizin desteği "üst işaretçisi" modeliyle: her girdi hangi dizinin içinde
@@ -30,8 +30,10 @@ const ENTRY_SIZE: usize = 128;
 const ENTRIES_PER_BLOCK: usize = SECTOR_SIZE / ENTRY_SIZE; // 4
 pub const MAX_FILES: usize = (DIR_BLOCKS as usize) * ENTRIES_PER_BLOCK; // 32
 const MAX_NAME: usize = 28;
-const MAX_BLOCKS_PER_FILE: usize = 22;
-pub const MAX_FILE_SIZE: usize = MAX_BLOCKS_PER_FILE * SECTOR_SIZE; // 11264
+// Blok no'ları girdide u16 olarak saklanır (40 + 44*2 = 128 bayt sınırı).
+// Disk ≤ 65535 blok olduğundan u16 yeterlidir; bu, dosya başına 22 KiB verir.
+const MAX_BLOCKS_PER_FILE: usize = 44;
+pub const MAX_FILE_SIZE: usize = MAX_BLOCKS_PER_FILE * SECTOR_SIZE; // 22528
 
 /// Mantıksal kök dizin kimliği.
 pub const ROOT: u8 = 0xFF;
@@ -165,6 +167,14 @@ fn put_u32(b: &mut [u8], off: usize, v: u32) {
     b[off..off + 4].copy_from_slice(&v.to_le_bytes());
 }
 
+fn get_u16(b: &[u8], off: usize) -> u16 {
+    u16::from_le_bytes([b[off], b[off + 1]])
+}
+
+fn put_u16(b: &mut [u8], off: usize, v: u16) {
+    b[off..off + 2].copy_from_slice(&v.to_le_bytes());
+}
+
 // --- Superblock / bağlama ---
 
 /// Diskte geçerli bir RFS olup olmadığını kontrol eder ve bağlar.
@@ -267,7 +277,7 @@ fn read_entry(index: usize) -> Result<Entry, FsError> {
     let block_count = get_u32(e, 36);
     let mut blocks = [0u32; MAX_BLOCKS_PER_FILE];
     for (i, b) in blocks.iter_mut().enumerate() {
-        *b = get_u32(e, 40 + i * 4);
+        *b = get_u16(e, 40 + i * 2) as u32;
     }
     Ok(Entry {
         name,
@@ -294,7 +304,7 @@ fn write_entry(index: usize, entry: &Entry) -> Result<(), FsError> {
     put_u32(e, 32, entry.size);
     put_u32(e, 36, entry.block_count);
     for (i, b) in entry.blocks.iter().enumerate() {
-        put_u32(e, 40 + i * 4, *b);
+        put_u16(e, 40 + i * 2, *b as u16);
     }
     wr(block, &buf)
 }

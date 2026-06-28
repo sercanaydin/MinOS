@@ -11,18 +11,18 @@ use crate::{keyboard, mouse};
 const STATUS: u16 = 0x64;
 const DATA: u16 = 0x60;
 
-/// Çıkış tamponundaki tüm bekleyen baytları okuyup yönlendirir.
+/// Fare tamponunu yoklar; klavye IRQ1 ile gelir (yedek yoklama `keyboard::poll_port`).
 pub fn poll() {
     loop {
         let status = unsafe { inb(STATUS) };
         if status & 0x01 == 0 {
-            break; // okunacak bayt yok
+            break;
         }
         let data = unsafe { inb(DATA) };
         if status & 0x20 != 0 {
-            mouse::feed(data); // aux = fare
+            mouse::feed(data);
         } else {
-            keyboard::feed(data); // klavye
+            keyboard::feed(data);
         }
     }
 }

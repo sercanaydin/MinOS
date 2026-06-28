@@ -10,24 +10,32 @@ extern crate alloc;
 mod allocator;
 mod ata;
 mod e1000;
+mod elf;
 mod fbcon;
+mod fd;
 mod net;
 mod font;
 mod font_data;
 mod fs;
+mod gdt;
 mod gfx;
 mod gui;
+mod idt;
 mod input;
 mod keyboard;
+mod mem;
 mod mouse;
 mod nvme;
 mod pci;
+mod pic;
 mod port;
 mod ramdisk;
 mod rtc;
 mod serial;
 mod shell;
+mod task;
 mod time;
+mod user;
 mod vga;
 
 use core::panic::PanicInfo;
@@ -42,8 +50,16 @@ pub extern "C" fn kernel_main(magic: u32, mbi: u32) -> ! {
     serial::init();
     serial::write_str("[boot] kernel_main calisti\n");
 
-    // Yığını (heap) en başta kur; sonraki her şey alloc kullanabilir.
-    allocator::init();
+    // Sayfalamayı aç ve RAM'i tespit et (heap'ten de önce, alloc kullanmaz).
+    let (heap_start, heap_size) = mem::init(mbi);
+    // Yığını (heap) tespit edilen RAM bölgesiyle kur; sonrası alloc kullanabilir.
+    allocator::init(heap_start, heap_size);
+    // GDT + TSS: ring0/ring3 segmentleri (kullanıcı modu için). IDT'den önce.
+    gdt::init();
+    // Kesme tablosu (IDT): CPU istisnalarını yakala (sayfa hatası vb.).
+    idt::init();
+    // PIC'i yeniden eşle ve PIT zamanlayıcısını (IRQ0, 100 Hz) kur.
+    pic::init();
     // Monotonik saat (TSC) kalibrasyonu — ağ zaman aşımları için.
     time::init();
 
@@ -88,6 +104,9 @@ pub extern "C" fn kernel_main(magic: u32, mbi: u32) -> ! {
     println!(">> Grafik masaüstü için F1'e basın ya da 'gui' yazın.");
     vga::set_color(Color::LightGray, Color::Black);
     println!();
+
+    // Tüm aygıt kurulumu bitti; donanım kesmelerini (IRQ0 zamanlayıcı) aç.
+    pic::enable();
 
     serial::write_str("[boot] shell baslatiliyor\n");
     shell::run();

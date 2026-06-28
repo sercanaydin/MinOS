@@ -18,6 +18,10 @@ static CWD: AtomicU8 = AtomicU8::new(fs::ROOT);
 fn cwd() -> u8 {
     CWD.load(Ordering::Relaxed)
 }
+/// Sistem çağrıları (fd) için: kabuğun geçerli çalışma dizini.
+pub fn current_dir() -> u8 {
+    CWD.load(Ordering::Relaxed)
+}
 fn set_cwd(v: u8) {
     CWD.store(v, Ordering::Relaxed);
 }
@@ -27,6 +31,38 @@ pub const DISK_BLOCKS: u32 = 4096; // 2 MiB
 
 // Dosya içeriğini oku/derle için tampon (heap olmadığından sabit boyutlu).
 static mut FILE_BUF: [u8; fs::MAX_FILE_SIZE] = [0; fs::MAX_FILE_SIZE];
+
+// `run <prog> <arg...>` ile verilen argüman dizesi (UTF-8). SYS_GETARG bunu
+// kullanıcı alanına kopyalar; crt0 argv'ye böler.
+const RUN_ARG_CAP: usize = 256;
+static mut RUN_ARG: [u8; RUN_ARG_CAP] = [0; RUN_ARG_CAP];
+static mut RUN_ARG_LEN: usize = 0;
+
+/// `run` argüman dizesini ayarlar (program adından sonraki kısım).
+fn set_run_arg(args: &[char]) {
+    let buf = unsafe { &mut *core::ptr::addr_of_mut!(RUN_ARG) };
+    let mut n = 0usize;
+    for &c in args {
+        let mut tmp = [0u8; 4];
+        let s = c.encode_utf8(&mut tmp);
+        let b = s.as_bytes();
+        if n + b.len() > RUN_ARG_CAP {
+            break;
+        }
+        buf[n..n + b.len()].copy_from_slice(b);
+        n += b.len();
+    }
+    unsafe { RUN_ARG_LEN = n };
+}
+
+/// SYS_GETARG: saklı argüman dizesini `dst`'e kopyalar, bayt sayısını döner.
+pub fn run_arg_copy(dst: &mut [u8]) -> u32 {
+    let src = unsafe { &*core::ptr::addr_of!(RUN_ARG) };
+    let len = unsafe { RUN_ARG_LEN };
+    let n = core::cmp::min(len, dst.len());
+    dst[..n].copy_from_slice(&src[..n]);
+    n as u32
+}
 
 pub fn run() -> ! {
     let mut buffer = ['\0'; BUF_LEN];
@@ -73,6 +109,8 @@ fn read_line(buffer: &mut [char; BUF_LEN]) -> usize {
                     }
                 }
             }
+            // Yön/düzenleme tuşları (PUA E010+) terminalde anlamsız — yok say.
+            c if (c as u32) >= 0xE000 => {}
             c if !c.is_control() => {
                 if len < BUF_LEN {
                     buffer[len] = c;
@@ -162,6 +200,32 @@ fn execute(line: &[char]) {
         nvme_format(args);
     } else if eq(cmd, "depo") || eq(cmd, "donanim") || eq(cmd, "hw") {
         dev_info();
+    } else if eq(cmd, "mem") || eq(cmd, "bellek") {
+        mem_info();
+    } else if eq(cmd, "inttest") || eq(cmd, "kesme") {
+        int_test();
+    } else if eq(cmd, "uptime") || eq(cmd, "süre") || eq(cmd, "sure") {
+        uptime_info();
+    } else if eq(cmd, "gorevtest") || eq(cmd, "görev") || eq(cmd, "gorev") || eq(cmd, "tasks") {
+        task_test();
+    } else if eq(cmd, "preempt") || eq(cmd, "önleyici") || eq(cmd, "onleyici") {
+        preempt_test();
+    } else if eq(cmd, "sleeptest") || eq(cmd, "uyku") {
+        sleep_test();
+    } else if eq(cmd, "userpreempt") || eq(cmd, "r3preempt") || eq(cmd, "sureconleyici") {
+        user_preempt_test();
+    } else if eq(cmd, "cprog") || eq(cmd, "cdemo") || eq(cmd, "chello") {
+        crate::user::run_c_demo();
+    } else if eq(cmd, "apps") || eq(cmd, "uygulamalar") {
+        install_c_apps();
+    } else if eq(cmd, "ring3") || eq(cmd, "r3") || eq(cmd, "kullanici") || eq(cmd, "kullanıcı") {
+        crate::user::run_hello();
+    } else if eq(cmd, "korumatest") || eq(cmd, "koruma") {
+        crate::user::run_fault();
+    } else if eq(cmd, "run") || eq(cmd, "calistir") || eq(cmd, "çalıştır") {
+        run_elf_file(args);
+    } else if eq(cmd, "kur") || eq(cmd, "elfkur") {
+        elf_install(args);
     } else if eq(cmd, "saat") || eq(cmd, "tarih") {
         show_clock();
     } else if eq(cmd, "web") || eq(cmd, "getir") {
@@ -193,7 +257,7 @@ fn help() {
     println!("  colors        - renk paletini gösterir");
     println!("  turkce        - Türkçe karakterleri gösterir");
     println!("  gui           - grafik masaüstüne geçer (F1 ile de açılır)");
-    println!("  web <adres>   - internetten bir sayfa çeker (metin tarayıcı)");
+    println!("  web <adres>   - sayfa çeker (http + https/TLS), örn: web https://...");
     println!("  reboot        - bilgisayarı yeniden başlatır");
     println!("Dosya sistemi (kalıcı disk):");
     println!("  ls                  - bulunulan dizini listeler");
@@ -206,6 +270,20 @@ fn help() {
     println!("  pwd                 - bulunulan dizin yolunu gösterir");
     println!("  df                  - disk kullanımını gösterir");
     println!("  depo                - depolama donanımını gösterir (NVMe/ATA)");
+    println!("  mem                 - bellek/sayfalama durumunu gösterir");
+    println!("  inttest             - kesme tablosunu (IDT) sınar — int3 yakala/dön");
+    println!("  uptime (veya süre)  - donanım zamanlayıcısı (PIT/IRQ0) çalışma süresi");
+    println!("  gorevtest (görev)   - işbirlikçi çok görevlilik (bağlam değiştirme) sınaması");
+    println!("  preempt (önleyici)  - önleyici çok görevlilik (timer ile zorla geçiş) sınaması");
+    println!("  sleeptest (uyku)    - görev uyku (sleep) sınaması");
+    println!("  userpreempt (r3preempt) - ring3 önleyici çok süreç (ayrı sayfa tabloları)");
+    println!("  cprog (chello)      - clang ile derlenmiş C programını ring 3'te çalıştırır");
+    println!("  apps                - C uygulamalarını diske kurar (web, calc, boya, c4)");
+    println!("  ring3 (veya r3)     - gömülü ELF'i yükler, ring 3'te çalıştırır");
+    println!("  kur [ad]            - gömülü ELF'i diske yazar (varsayılan: prog)");
+    println!("  run <dosya> [arg]   - diskteki bir ELF'i yükleyip ring 3'te çalıştırır");
+    println!("  run c4 <dosya.c>    - OS içinde C kaynağını derler ve çalıştırır (c4)");
+    println!("  korumatest          - ring 3'ten çekirdeğe yazmayı dener (koruma/panik)");
     println!("  format              - aktif diski sıfırlar (TÜM veri silinir)");
     println!("  nvmeformat EVET     - NVMe diskini kalıcı yapar (açık onay ister)");
 }
@@ -217,19 +295,23 @@ fn web_cmd(args: &[char]) {
     let (s, e) = trim(args);
     let a = &args[s..e];
     if a.is_empty() {
-        println!("kullanım: web <adres>   (örn: web example.com  ya da  web example.com/sayfa)");
+        println!("kullanım: web <adres>   (örn: web example.com  ya da  web https://example.com)");
         return;
     }
 
     // İlk kelimeyi al (boşluğa kadar) ve String'e çevir.
-    let mut url = String::new();
+    let mut raw = String::new();
     for &c in a {
         if c == ' ' {
             break;
         }
-        url.push(c);
+        raw.push(c);
     }
-    let url = url.trim_start_matches("http://").trim_start_matches("https://");
+
+    // Şemayı belirle: https varsayılan değil; açıkça http:// yoksa ve https://
+    // yazılmışsa TLS. Şema yoksa düz HTTP dene.
+    let mut secure = raw.starts_with("https://");
+    let url = raw.trim_start_matches("http://").trim_start_matches("https://");
     let (mut host, mut path) = match url.find('/') {
         Some(i) => (url[..i].to_string(), url[i..].to_string()),
         None => (url.to_string(), String::from("/")),
@@ -238,14 +320,25 @@ fn web_cmd(args: &[char]) {
     // En çok 5 yönlendirme (301/302/...) takip et.
     for _ in 0..5 {
         vga::set_color(Color::LightCyan, Color::Black);
-        println!("[web] {host}{path} bağlanılıyor...");
+        let scheme = if secure { "https" } else { "http" };
+        println!("[web] {scheme}://{host}{path} bağlanılıyor...");
         vga::set_color(Color::LightGray, Color::Black);
 
-        let resp = match crate::net::fetch(&host, &path) {
+        let result = if secure {
+            crate::net::fetch_https(&host, &path)
+        } else {
+            crate::net::fetch(&host, &path)
+        };
+        let resp = match result {
             Ok(r) => r,
             Err(err) => {
                 vga::set_color(Color::LightRed, Color::Black);
                 println!("[web] hata: {err}");
+                if secure {
+                    vga::set_color(Color::DarkGray, Color::Black);
+                    println!("      Not: TLS 1.3 (rustls), kök sertifikalar doğrulanır.");
+                    println!("      Sertifika hatasında saat/tarihin doğru olduğundan emin olun.");
+                }
                 vga::set_color(Color::LightGray, Color::Black);
                 return;
             }
@@ -255,6 +348,7 @@ fn web_cmd(args: &[char]) {
         if (300..400).contains(&code) {
             if let Some(loc) = header_value(&resp, "location") {
                 if let Some(rest) = loc.strip_prefix("http://") {
+                    secure = false;
                     match rest.find('/') {
                         Some(i) => {
                             host = rest[..i].to_string();
@@ -269,16 +363,22 @@ fn web_cmd(args: &[char]) {
                     println!("[web] yönlendiriliyor -> {host}{path}");
                     vga::set_color(Color::LightGray, Color::Black);
                     continue;
-                } else if loc.starts_with("https://") {
-                    vga::set_color(Color::Yellow, Color::Black);
-                    println!("[web] Bu adres HTTPS'e yönlendiriyor; TLS (şifreli bağlantı)");
-                    println!("      desteğimiz yok. Düz HTTP sunan bir site deneyin, örn:");
-                    println!("        web httpforever.com");
-                    println!("        web neverssl.com");
+                } else if let Some(rest) = loc.strip_prefix("https://") {
+                    secure = true;
+                    match rest.find('/') {
+                        Some(i) => {
+                            host = rest[..i].to_string();
+                            path = rest[i..].to_string();
+                        }
+                        None => {
+                            host = rest.to_string();
+                            path = String::from("/");
+                        }
+                    }
                     vga::set_color(Color::DarkGray, Color::Black);
-                    println!("[web] Konum: {loc}");
+                    println!("[web] yönlendiriliyor (TLS) -> {host}{path}");
                     vga::set_color(Color::LightGray, Color::Black);
-                    return;
+                    continue;
                 } else if let Some(rest) = loc.strip_prefix('/') {
                     path = String::from("/");
                     path.push_str(rest);
@@ -699,6 +799,187 @@ fn fs_format() {
 /// Algılanan depolama donanımını ve geçerli arka ucu özetler. Gerçek donanımda
 /// (USB'den açıp) bu komutu çalıştırınca kalıcı depolamanın mümkün olup
 /// olmadığını öğreniriz.
+/// `run <dosya>`: diskteki bir dosyayı okuyup ELF olarak ring 3'te çalıştırır.
+fn run_elf_file(args: &[char]) {
+    let (name, rest) = split_arg(args);
+    let mut nm = [0u8; 28];
+    let nl = match name_to_bytes(name, &mut nm) {
+        Some(l) => l,
+        None => {
+            println!("kullanım: run <dosya> [argümanlar]");
+            return;
+        }
+    };
+    // Programa iletilecek argüman dizesini (ad sonrası) sakla.
+    set_run_arg(rest);
+    let buf = unsafe { &mut *core::ptr::addr_of_mut!(FILE_BUF) };
+    match fs::read_file(&nm[..nl], cwd(), buf) {
+        Ok(size) => crate::user::run_elf(&buf[..size]),
+        Err(e) => print_err(e),
+    }
+}
+
+/// `apps`: gömülü tüm C uygulamalarını diske (RFS köküne) yazar ve listeler.
+/// Sonrasında `run web`, `run calc`, `run paint` ile diskten çalıştırılabilir.
+fn install_c_apps() {
+    vga::set_color(Color::LightCyan, Color::Black);
+    println!("C uygulamaları diske kuruluyor (RFS):");
+    vga::set_color(Color::LightGray, Color::Black);
+    let mut installed = 0;
+    for (name, elf) in crate::user::c_apps() {
+        if elf.len() < 52 {
+            println!("  {name:8} - atlandı (gömülü değil; clang ile derleyin)");
+            continue;
+        }
+        match fs::write_file(name.as_bytes(), fs::ROOT, elf) {
+            Ok(()) => {
+                println!("  {name:8} - kuruldu ({} bayt)", elf.len());
+                installed += 1;
+            }
+            Err(e) => println!("  {name:8} - HATA: {}", e.message()),
+        }
+    }
+    if installed > 0 {
+        vga::set_color(Color::LightGreen, Color::Black);
+        println!("Tamam. Çalıştırmak için: run web | run calc | run boya | run c4 <dosya.c>");
+        println!("İpucu: masaüstünde [+ Kod] ile C yaz, kaydet, sonra: run c4 kod.c");
+        vga::set_color(Color::LightGray, Color::Black);
+    }
+}
+
+/// `kur [ad]`: gömülü örnek ELF'i diske yazar (varsayılan ad: `prog`).
+fn elf_install(args: &[char]) {
+    let (name, _) = split_arg(args);
+    let mut nm = [0u8; 28];
+    let nl = if name.is_empty() {
+        let d = b"prog";
+        nm[..d.len()].copy_from_slice(d);
+        d.len()
+    } else {
+        match name_to_bytes(name, &mut nm) {
+            Some(l) => l,
+            None => {
+                println!("ad hatalı");
+                return;
+            }
+        }
+    };
+    let elf = crate::user::embedded_elf();
+    match fs::write_file(&nm[..nl], cwd(), elf) {
+        Ok(()) => {
+            vga::set_color(Color::LightGreen, Color::Black);
+            if let Ok(s) = core::str::from_utf8(&nm[..nl]) {
+                println!(
+                    "Gömülü ELF diske yazıldı: '{s}' ({} bayt). 'run {s}' ile çalıştırın.",
+                    elf.len()
+                );
+            }
+            vga::set_color(Color::LightGray, Color::Black);
+        }
+        Err(e) => print_err(e),
+    }
+}
+
+fn int_test() {
+    vga::set_color(Color::LightCyan, Color::Black);
+    println!("Kesme (IDT) sınaması:");
+    vga::set_color(Color::LightGray, Color::Black);
+    println!("  int3 (breakpoint) tetikleniyor...");
+    unsafe { core::arch::asm!("int3") };
+    vga::set_color(Color::LightGreen, Color::Black);
+    println!("  -> istisna yakalandı ve sorunsuz dönüldü (IDT çalışıyor).");
+    vga::set_color(Color::DarkGray, Color::Black);
+    println!("  Not: gerçek bir hata (örn. geçersiz erişim) olursa çekirdek");
+    println!("  panik ekranı gösterip durur (üçlü hata/reset yerine).");
+    vga::set_color(Color::LightGray, Color::Black);
+}
+
+fn task_test() {
+    vga::set_color(Color::LightCyan, Color::Black);
+    println!("Çok görevlilik (işbirlikçi) sınaması:");
+    vga::set_color(Color::LightGray, Color::Black);
+    println!("  3 görev oluşturulup round-robin çalıştırılıyor.");
+    println!("  Her görev kendi yığınında çalışır; yield ile sıra değişir.");
+    println!("  ----------------------------------------");
+    crate::task::run_demo(3);
+    println!("  ----------------------------------------");
+    vga::set_color(Color::LightGreen, Color::Black);
+    println!("  -> tüm görevler bitti; kabuğa dönüldü (bağlam değiştirme çalışıyor).");
+    vga::set_color(Color::LightGray, Color::Black);
+}
+
+fn user_preempt_test() {
+    crate::user::run_preempt_demo();
+}
+
+fn sleep_test() {
+    vga::set_color(Color::LightCyan, Color::Black);
+    println!("Görev uyku (sleep) sınaması:");
+    vga::set_color(Color::LightGray, Color::Black);
+    println!("  3 görev farklı süreler uyur; timer ile uyanırlar.");
+    println!("  ----------------------------------------");
+    crate::task::run_sleep_demo();
+    println!("  ----------------------------------------");
+    vga::set_color(Color::LightGreen, Color::Black);
+    println!("  -> sleep/yield ile görevler sırayla uyuyup uyandi.");
+    vga::set_color(Color::LightGray, Color::Black);
+}
+
+fn preempt_test() {
+    vga::set_color(Color::LightCyan, Color::Black);
+    println!("Önleyici (preemptive) çok görevlilik sınaması:");
+    vga::set_color(Color::LightGray, Color::Black);
+    println!("  3 hesap-yoğun görev oluşturuluyor; HİÇBİRİ yield çağırmıyor.");
+    println!("  Zamanlayıcı kesmesi (IRQ0) onları ~1.5 sn boyunca zorla böler.");
+    println!("  Süre dolunca her görevin yaptığı yineleme sayısı yazılır:");
+    println!("  ----------------------------------------");
+    crate::task::run_preempt(3, 150);
+    println!("  ----------------------------------------");
+    vga::set_color(Color::LightGreen, Color::Black);
+    println!("  -> üçü de CPU aldı; timer onları kendiliğinden böldü (önleyici zamanlama).");
+    vga::set_color(Color::LightGray, Color::Black);
+}
+
+fn uptime_info() {
+    let ticks = crate::pic::ticks();
+    let ms = crate::pic::uptime_ms();
+    let secs = ms / 1000;
+    let mins = secs / 60;
+
+    vga::set_color(Color::LightCyan, Color::Black);
+    println!("Çalışma süresi (donanım zamanlayıcısı):");
+    vga::set_color(Color::LightGray, Color::Black);
+    println!("  PIT frekansı : {} Hz (IRQ0)", crate::pic::HZ);
+    println!("  Tik (tick)   : {ticks}");
+    println!("  Süre         : {} dk {} sn", mins, secs % 60);
+    vga::set_color(Color::DarkGray, Color::Black);
+    println!("  Not: bu sayaç gerçek donanım kesmesiyle (PIT) artar; önleyici");
+    println!("  (preemptive) çok görevliliğin temelidir.");
+    vga::set_color(Color::LightGray, Color::Black);
+}
+
+fn mem_info() {
+    let total = crate::mem::total_ram();
+    let heap = crate::allocator::heap_size();
+    let used = crate::allocator::heap_used();
+    let free = heap.saturating_sub(used);
+    let frames = crate::mem::frames_free();
+
+    vga::set_color(Color::LightCyan, Color::Black);
+    println!("Bellek ve sayfalama:");
+    vga::set_color(Color::LightGray, Color::Black);
+    println!("  Sayfalama   : AÇIK (birebir/identity, 4 MiB sayfa)");
+    println!("  Toplam RAM  : ~{} MiB", total / (1024 * 1024));
+    println!("  Yığın (heap): {} MiB", heap / (1024 * 1024));
+    println!("    kullanılan: {} KiB", used / 1024);
+    println!("    boş       : {} MiB", free / (1024 * 1024));
+    println!(
+        "  Çerçeve havuzu (4 KiB): {} boş çerçeve (~{} MiB)",
+        frames,
+        frames * 4096 / (1024 * 1024)
+    );
+}
+
 fn dev_info() {
     vga::set_color(Color::LightCyan, Color::Black);
     println!("Depolama donanımı:");

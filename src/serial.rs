@@ -38,6 +38,20 @@ pub fn write_str(s: &str) {
     }
 }
 
+/// Bir 32-bit sayıyı `0x` önekiyle, 8 haneli onaltılık olarak yazar.
+#[allow(dead_code)]
+pub fn write_hex(n: u32) {
+    write_str("0x");
+    for j in 0..8 {
+        let nib = ((n >> ((7 - j) * 4)) & 0xF) as u8;
+        write_byte(if nib < 10 {
+            b'0' + nib
+        } else {
+            b'a' + (nib - 10)
+        });
+    }
+}
+
 /// Bir sayıyı ondalık olarak yazar (hata ayıklama için).
 #[allow(dead_code)]
 pub fn write_dec(mut n: u32) {

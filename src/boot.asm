@@ -30,11 +30,12 @@ align 4
     dd 32                      ; tercih edilen renk derinliği (bit/piksel)
 
 ; --- Çekirdek yığını (stack) ---
-; x86'da yığın aşağı doğru büyür; 16 KiB ayırıyoruz.
+; x86'da yığın aşağı doğru büyür. TLS/kripto işlemleri yığını zorladığından
+; 64 KiB ayırıyoruz.
 section .bss
 align 16
 stack_bottom:
-    resb 16384
+    resb 65536
 stack_top:
 
 ; --- Giriş noktası ---
@@ -45,8 +46,24 @@ _start:
     ; Yığın işaretçisini ayarla.
     mov esp, stack_top
 
+    ; --- SSE/SSE2'yi etkinleştir ---
+    ; Kripto kütüphaneleri (aes/polyval/sha2) tamsayı SIMD (SSE2) komutları
+    ; üretir; bunlar CR0.EM=0 ve CR4.OSFXSR=1 olmadan #UD verir.
+    ; ÖNEMLİ: Multiboot sihirli sayısı eax'te, bilgi yapısı ebx'te gelir;
+    ; bunları ezmemek için yalnızca ecx kullanıyoruz.
+    mov ecx, cr0
+    and ecx, 0xFFFFFFF3      ; EM=0 (bit2), TS=0 (bit3) temizle
+    or  ecx, 0x00000002      ; MP=1 (bit1)
+    mov cr0, ecx
+    fninit
+    mov ecx, cr4
+    or  ecx, 0x00000600      ; OSFXSR (bit9) + OSXMMEXCPT (bit10)
+    mov cr4, ecx
+
     ; Multiboot bilgilerini Rust'a argüman olarak ilet:
     ;   eax = sihirli sayı, ebx = multiboot info yapısının adresi.
+    ; SSE hizalı erişimler için yığını 16 bayta hizala (2 argüman = 8 bayt).
+    sub esp, 8
     push ebx
     push eax
     call kernel_main

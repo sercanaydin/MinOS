@@ -29,4 +29,9 @@ SECTIONS {
         *(COMMON)
         *(.bss .bss.*)
     }
+
+    /* Çekirdek imajının bittiği adres. Sayfalama/heap kodu (src/mem.rs)
+     * boş RAM'i buradan itibaren kullanır. */
+    . = ALIGN(4096);
+    kernel_end = .;
 }

@@ -1,11 +1,11 @@
-//! PS/2 klavye sürücüsü — Türkçe-Q düzeni (kesmesiz, yoklama / polling ile).
-//!
-//! Klavye denetleyicisinin durum portunu (0x64) yoklayıp veri portundan (0x60)
-//! Set 1 tarama kodlarını okuruz. Tarama kodları tuşun FİZİKSEL konumuna
-//! karşılık gelir; biz de bunları Türkçe-Q düzenine göre karakterlere çeviririz.
+//! PS/2 klavye sürücüsü — Türkçe-Q düzeni (IRQ1 kesmesi + yedek yoklama).
 //!
 //! Türkçe-Q'da özel harflerin konumu (ABD klavyesindeki karşılığı):
 //!   ğ→[   ü→]   ş→;   i/İ→'   ö→,   ç→.   ı→ QWERTY 'i' tuşu
+
+use crate::port::inb;
+
+const DATA: u16 = 0x60;
 
 /// Tarama kodu → karakter (Shift basılı değilken). 0 = eşlenmemiş.
 static MAP: [char; 128] = build_map(false);
@@ -73,8 +73,35 @@ const fn build_map(shift: bool) -> [char; 128] {
     m[0x34] = if shift { 'Ç' } else { 'ç' };
     m[0x35] = if shift { ':' } else { '.' };
 
+    // 102. tuş (Z'nin solu, "<>" tuşu) — programlama için kullanışlı.
+    m[0x56] = if shift { '>' } else { '<' };
+
     m[0x39] = ' '; // Boşluk
 
+    m
+}
+
+/// AltGr (Sağ Alt) basılıyken üretilen karakterler — Türkçe-Q programlama katmanı.
+/// `{ } [ ] \ | @ # $ ~ \`` gibi C için gereken simgeler buradadır.
+static MAP_ALTGR: [char; 128] = build_altgr();
+
+const fn build_altgr() -> [char; 128] {
+    let mut m = ['\0'; 128];
+    m[0x04] = '#'; // 3
+    m[0x05] = '$'; // 4
+    m[0x08] = '{'; // 7
+    m[0x09] = '['; // 8
+    m[0x0A] = ']'; // 9
+    m[0x0B] = '}'; // 0
+    m[0x0C] = '\\'; // '*' tuşu
+    m[0x0D] = '|'; // '-' tuşu
+    m[0x10] = '@'; // q
+    m[0x1B] = '~'; // 'ü' tuşu
+    m[0x2B] = '`'; // ',' tuşu
+    // '<' / '>' — bazı klavyelerde (örn. ANSI MacBook) Z'nin solundaki 102. tuş
+    // (0x56) yoktur. Her klavyede ulaşılabilsin diye AltGr+ö = '<', AltGr+ç = '>'.
+    m[0x33] = '<'; // 'ö' tuşu
+    m[0x34] = '>'; // 'ç' tuşu
     m
 }
 
@@ -92,8 +119,21 @@ pub const KEY_TOGGLE: char = '\u{E001}';
 /// Esc tuşu (masaüstünden terminale dönüş için de kullanılır).
 pub const KEY_ESC: char = '\u{1B}';
 
+// Yön/düzenleme tuşları — Özel Kullanım Alanı kod noktaları (metin değildir).
+// Editör bunları imleç hareketi için yorumlar; diğer tüketiciler yok sayar.
+pub const KEY_LEFT: char = '\u{E010}';
+pub const KEY_RIGHT: char = '\u{E011}';
+pub const KEY_UP: char = '\u{E012}';
+pub const KEY_DOWN: char = '\u{E013}';
+pub const KEY_HOME: char = '\u{E014}';
+pub const KEY_END: char = '\u{E015}';
+pub const KEY_DEL: char = '\u{E016}';
+
 static mut SHIFT_PRESSED: bool = false;
 static mut CAPS_ON: bool = false;
+static mut ALTGR_PRESSED: bool = false;
+// 0xE0 genişletilmiş tuş ön eki görüldü mü (sonraki bayt için).
+static mut EXTENDED: bool = false;
 
 // Çözümlenmiş karakterler için küçük halka tampon. Giriş tek noktadan
 // (input::poll) işlendiği için klavye ve fare baytları karışmaz.
@@ -125,9 +165,53 @@ pub fn pop() -> Option<char> {
     }
 }
 
-/// 8042'den okunan bir klavye tarama kodunu işler; ürettiği karakteri
-/// (varsa) tampona koyar. `input::poll` tarafından çağrılır.
+/// IRQ1: veri portundan tarama kodunu okuyup işler.
+pub fn irq_feed() {
+    let code = unsafe { inb(DATA) };
+    feed(code);
+}
+
+/// 8042 yedek yoklama (klavye IRQ1 devre dışıysa elle çağrılabilir).
+#[allow(dead_code)]
+pub fn poll_port() {
+    let status = unsafe { inb(0x64) };
+    if status & 0x01 == 0 || status & 0x20 != 0 {
+        return;
+    }
+    let code = unsafe { inb(DATA) };
+    feed(code);
+}
+
+/// Tarama kodunu karaktere çevirip tampona koyar.
 pub fn feed(code: u8) {
+    // 0xE0: genişletilmiş tuş ön eki (Sağ Alt / AltGr, oklar, ...).
+    if code == 0xE0 {
+        unsafe { EXTENDED = true };
+        return;
+    }
+    let ext = unsafe {
+        let e = EXTENDED;
+        EXTENDED = false;
+        e
+    };
+    // Genişletilmiş tuşlar: Sağ Alt (AltGr) ve yön/düzenleme tuşları.
+    // (Bırakma kodları 0x80'li gelir; yalnızca basma kodlarını işleriz.)
+    if ext {
+        match code {
+            0x38 => unsafe { ALTGR_PRESSED = true },
+            0xB8 => unsafe { ALTGR_PRESSED = false },
+            0x4B => push(KEY_LEFT),
+            0x4D => push(KEY_RIGHT),
+            0x48 => push(KEY_UP),
+            0x50 => push(KEY_DOWN),
+            0x47 => push(KEY_HOME),
+            0x4F => push(KEY_END),
+            0x53 => push(KEY_DEL),
+            _ => {}
+        }
+        return;
+    }
+
     match code {
         LSHIFT_DOWN | RSHIFT_DOWN => {
             unsafe { SHIFT_PRESSED = true };
@@ -159,9 +243,16 @@ pub fn feed(code: u8) {
 
     let shift = unsafe { SHIFT_PRESSED };
     let caps = unsafe { CAPS_ON };
-    let mut ch = if shift { MAP_SHIFT[code as usize] } else { MAP[code as usize] };
+    let altgr = unsafe { ALTGR_PRESSED };
+    let mut ch = if altgr {
+        MAP_ALTGR[code as usize]
+    } else if shift {
+        MAP_SHIFT[code as usize]
+    } else {
+        MAP[code as usize]
+    };
 
-    if caps && ch.is_alphabetic() {
+    if !altgr && caps && ch.is_alphabetic() {
         ch = if shift { to_lower_tr(ch) } else { to_upper_tr(ch) };
     }
 
@@ -170,13 +261,15 @@ pub fn feed(code: u8) {
     }
 }
 
-/// Bir karakter üretilene kadar bekler ve onu döndürür (kabuk için).
+/// Bir karakter üretilene kadar bekler. IRQ1 (IF=1 iken) tampona iter; ayrıca
+/// 8042'yi doğrudan yoklarız ki `int 0x80` (IF=0, kesme kapısı) bağlamından
+/// çağrıldığında da çalışsın. `hlt` KULLANMAYIZ: IF=0 iken sonsuza dek kilitler.
 pub fn read_char() -> char {
     loop {
-        crate::input::poll();
         if let Some(c) = pop() {
             return c;
         }
+        crate::input::poll();
         core::hint::spin_loop();
     }
 }
