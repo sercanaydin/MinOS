@@ -393,11 +393,15 @@ GRUB / QEMU  ──►  boot.asm (_start)  ──►  kernel_main()  ──►  
   (`user/c4.c`). Program argümanı (`run c4 <dosya>`) `SYS_GETARG` ile `crt0`'a iletilip
   `argv`'ye bölünür.
 
-  **C için klavye — AltGr (Sağ Alt) katmanı:** C'nin gerektirdiği `{ } [ ] \ | @ # ~`
-  simgeleri Türkçe-Q'da AltGr ile üretilir (`AltGr+7={`, `AltGr+8=[`, `AltGr+9=]`,
-  `AltGr+0=}`, `AltGr+* = \`, `AltGr+- = |`, `AltGr+Q=@`, `AltGr+3=#`, `AltGr+ü=~`).
-  `<` / `>` için Z'nin solundaki 102. tuş kullanılır. Böylece tam bir C kaynağı
-  klavyeden yazılabilir.
+  **C için klavye — AltGr (Sağ Alt / macOS'ta Option) katmanı:** C'nin gerektirdiği
+  `{ } [ ] \ | @ # ~` simgeleri Türkçe-Q'da AltGr ile üretilir (`AltGr+7={`, `AltGr+8=[`,
+  `AltGr+9=]`, `AltGr+0=}`, `AltGr+* = \`, `AltGr+- = |`, `AltGr+Q=@`, `AltGr+3=#`,
+  `AltGr+ü=~`). `<` / `>` iki şekilde yazılır: Z'nin solundaki 102. tuş (ISO klavye) **ya da**
+  `AltGr+ö = <`, `AltGr+ç = >` (ANSI MacBook gibi 102. tuşu olmayan klavyeler için).
+
+  **Editörde imleç:** Ok tuşları (←/→/↑/↓) ile gezinir, `Home`/`End` satır başı/sonu,
+  `Delete` öndeki karakteri, `Backspace` imleçten önceki karakteri siler; yazılanlar
+  imleç konumuna eklenir.
 
   Tam newlib **değildir**: dosya akışları (`FILE*`/`fopen`), kayan nokta biçimleri
   (`%f`), `<math.h>`, `setjmp/longjmp`, `iconv`/`locale` yoktur. Gerçek newlib için

@@ -2,6 +2,10 @@
 //!
 //! Türkçe-Q'da özel harflerin konumu (ABD klavyesindeki karşılığı):
 //!   ğ→[   ü→]   ş→;   i/İ→'   ö→,   ç→.   ı→ QWERTY 'i' tuşu
+//!
+//! AltGr (Sağ Alt; macOS'ta Option) programlama katmanını açar: `{ } [ ] \ | @ # ~`
+//! ve `< >` (AltGr+ö / AltGr+ç). Ok/Home/End/Delete tuşları Özel Kullanım Alanı kod
+//! noktaları olarak üretilir; editör bunları imleç hareketi için yorumlar.
 
 use crate::port::inb;
 
